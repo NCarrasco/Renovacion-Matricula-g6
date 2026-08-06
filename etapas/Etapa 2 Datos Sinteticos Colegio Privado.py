@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # Etapa 2 · Generación de datos sintéticos para el Caso 6
-# Responsable: Rafael Eladio Moronta (GitHub: jinfron)
 # Semilla fija para reproducibilidad
 np.random.seed(42)
 
