@@ -1,0 +1,39 @@
+ETAPA 3 · AUDITAR
+
+Cada variable fue clasificada respondiendo la pregunta guía:
+
+¿Esta variable existiría, con el mismo valor y significado, al momento de decidir?
+
+CLASIFICACIÓN DE VARIABLES
+
+Predictoras válidas (11):
+- campus_id
+- grade_level
+- years_enrolled
+- attendance_rate
+- average_grade
+- late_payments
+- outstanding_balance
+- siblings_enrolled
+- family_distance_km
+- complaints_last_year
+- scholarship_pct
+
+Identificadores excluidos:
+- student_id
+- academic_year
+
+Variables de intervención excluidas:
+- retention_call
+- payment_plan_offered
+
+Variables con fuga posteriores a la decisión excluidas:
+- withdrawal_form_date
+- new_school_reported
+- final_enrollment_status
+- final_balance_settlement
+
+Variable objetivo:
+- reenrolled_next_year
+
+La auditoría permite utilizar únicamente las variables disponibles al momento de decidir y excluir identificadores, intervenciones y variables posteriores a la decisión.
