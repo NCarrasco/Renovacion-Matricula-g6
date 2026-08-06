@@ -1,0 +1,26 @@
+ETAPAS 2 Y 3
+
+2.2 Generar datos
+
+Se generó un conjunto sintético de 4,000 estudiantes a lo largo de cuatro años académicos (2022-2025), con semilla fija (random_state = 42) para garantizar reproducibilidad exacta.
+
+El dataset incluye estructura de panel (el mismo estudiante se repite mientras permanece matriculado), variables numéricas y categóricas, valores faltantes, un choque macroeconómico a partir de 2024, una intervención (llamada de retención y plan de pago) que puede reducir el riesgo observado, y variables con fuga intencional que solo existen después de tomada la decisión.
+
+2.3 Auditar
+
+Cada variable fue clasificada respondiendo la pregunta guía: ¿esta variable existiría, con el mismo valor y significado, al momento de decidir?
+
+Predictoras válidas (11):
+campus_id, grade_level, years_enrolled, attendance_rate, average_grade, late_payments, outstanding_balance, siblings_enrolled, family_distance_km, complaints_last_year, scholarship_pct
+
+Identificadores (excluidas):
+student_id, academic_year
+
+Intervención (excluidas):
+retention_call, payment_plan_offered
+
+Fuga posteriores a la decisión (excluidas):
+withdrawal_form_date, new_school_reported, final_enrollment_status, final_balance_settlement
+
+Target:
+reenrolled_next_year
