@@ -1,0 +1,79 @@
+# Protocolo Congelado — Caso 6: Riesgo de no renovación de matrícula
+Grupo 6 · Red Educativa Futuro
+Responsable: Norman (Etapa 6)
+Fuente de verdad: Scripts final para el google colap/Caso6_PriorizacionMatricula.ipynb
+Estado: Congelado
+
+## 1. Variables definitivas
+campus_id, grade_level, years_enrolled, attendance_rate, average_grade,
+late_payments, outstanding_balance, siblings_enrolled, family_distance_km,
+complaints_last_year, scholarship_pct
+
+## 2. Variables excluidas
+Identificadores (no se usan como predictoras): student_id, academic_year
+Intervención (no existían al momento de decidir): retention_call, payment_plan_offered
+Fuga (posteriores a la decisión): withdrawal_form_date, new_school_reported,
+final_enrollment_status, final_balance_settlement
+
+## 3. Reglas de limpieza
+No se aplican reglas adicionales de limpieza (outliers, deduplicación). Los
+datos sintéticos ya vienen acotados desde la generación (Etapa 2, uso de
+np.clip en attendance_rate y average_grade).
+
+## 4. Imputación
+Numéricas: mediana (SimpleImputer, strategy="median")
+Categóricas: moda (SimpleImputer, strategy="most_frequent")
+
+## 5. Codificación
+Categóricas (campus_id, grade_level): One-Hot Encoding (handle_unknown="ignore")
+Numéricas: estandarización (StandardScaler)
+
+## 6. Algoritmo
+Regresión Logística (modelo mínimo interpretable)
+
+Justificación: en la comparación de validación (año 2024), la Regresión
+Logística superó a Random Forest en las cinco métricas evaluadas (ROC-AUC,
+capturados@300, precisión@300, recall@300 y lift@300). El modelo más complejo
+no ofreció ninguna mejora que justificara su uso, y la Regresión Logística
+además es más fácil de auditar frente al equipo de admisiones y ante
+cuestionamientos de equidad de las familias.
+
+## 7. Hiperparámetros
+max_iter=1000, random_state=42
+(resto en default de sklearn: penalty="l2", C=1.0, solver="lbfgs")
+
+## 8. Métrica
+Principal: ROC-AUC
+Operativa (decide la elección del modelo, dado que la capacidad es fija):
+Precisión@300, Recall@300, Lift@300
+
+## 9. Umbral
+No se usa umbral de probabilidad. Selección por ranking descendente,
+top 300 según capacidad operativa.
+
+## 10. Baseline
+Comparados en validación (2024):
+- Trivial (tasa histórica para todos): ROC-AUC 0.500 · Precisión@300 43.3%
+- Histórico (tasa de renovación por grado): ROC-AUC 0.505 · Precisión@300 38.0%
+- Operativo (ordenar por outstanding_balance, práctica actual del colegio):
+  ROC-AUC 0.391 · Precisión@300 54.7%
+
+El baseline operativo tiene el peor ROC-AUC (por debajo del azar) porque la
+intervención (retention_call / payment_plan_offered) se activa precisamente
+sobre los balances más altos, reduciendo el no_renueva observado en ese
+grupo — la política actual "contamina" su propia métrica global. Aun así, es
+el baseline de referencia por ser la práctica que se busca reemplazar.
+
+Resultado en test (2025, evaluación única): Regresión Logística captura 178
+de 1,710 familias que no renovaron, frente a 77 del baseline operativo
+(+101 familias, ROC-AUC 0.6285).
+
+## 11. Regla de priorización
+Ordenar por score de riesgo (probabilidad de no renovación) de forma
+descendente; tomar los primeros 300. En caso de empate en el score, prioridad
+a la familia con mayor outstanding_balance (saldo pendiente) — variable ya
+identificada por el propio enunciado del caso como criterio de la práctica
+actual del colegio.
+
+## 12. Capacidad operativa
+300 familias por campaña de reinscripción
