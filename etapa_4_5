@@ -1,0 +1,153 @@
+Sección 4 — Diseñar la evaluación
+Un caso nuevo es un estudiante activo evaluado antes de conocer el resultado de su reinscripción. La partición es temporal, no aleatoria, para simular el uso futuro del modelo y evitar fuga entre periodos:
+
+Bloque	Años	Uso
+Entrenamiento	2022 – 2023	Ajustar el modelo
+Validación	2024	Comparar baselines y modelos, elegir el ganador
+Test	2025	Reservado — se abre una sola vez, en la Sección 7
+La imputación, el escalado y la codificación se ajustan únicamente con datos de entrenamiento, dentro de un Pipeline, para no filtrar información del futuro.
+
+# ── CELDA 4.1: PARTICIÓN TEMPORAL Y PREPROCESAMIENTO ─────────
+# Propósito: Separar train / validación / test por año y definir el pipeline de preprocesamiento
+# Inputs:    df, feature_cols, numeric_features, categorical_features, target
+# Outputs:   X_train, y_train, X_val, y_val, X_test, y_test, preprocessor
+# ═════════════════════════════════════════════════════════════
+
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+train_mask = df["academic_year"].isin([2022, 2023])
+val_mask = df["academic_year"] == 2024
+test_mask = df["academic_year"] == 2025
+
+df_train = df[train_mask].copy()
+df_val = df[val_mask].copy()
+df_test = df[test_mask].copy()
+
+X_train, y_train = df_train[feature_cols], df_train[target]
+X_val, y_val = df_val[feature_cols], df_val[target]
+X_test, y_test = df_test[feature_cols], df_test[target]
+
+num_transformer = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+cat_transformer = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(handle_unknown="ignore"))
+])
+preprocessor = ColumnTransformer([
+    ("num", num_transformer, numeric_features),
+    ("cat", cat_transformer, categorical_features)
+])
+
+print(f"Entrenamiento: {len(df_train):,} filas (2022-2023)")
+print(f"Validación:    {len(df_val):,} filas (2024)")
+print(f"Test:          {len(df_test):,} filas (2025, reservado)")
+
+Entrenamiento: 3,043 filas (2022-2023)
+Validación:    3,040 filas (2024)
+Test:          4,000 filas (2025, reservado)
+
+Sección 5 — Comparar baselines y modelos
+Se comparan tres baselines y dos modelos, todos evaluados sobre el conjunto de validación (2024) con la misma métrica: ROC-AUC.
+
+# ── CELDA 5.1: BASELINES Y MODELOS CANDIDATOS ────────────────
+# Propósito: Entrenar baselines y modelos; comparar en validación con ROC-AUC
+#            y con métricas @300, porque la capacidad operativa es fija (300)
+# Inputs:    X_train, y_train, X_val, y_val, df_train, df_val, preprocessor
+# Outputs:   model_lr, model_rf, tabla comparativa
+# ═════════════════════════════════════════════════════════════
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
+
+# 1) Baseline trivial: tasa histórica global
+p_global_train = y_train.mean()
+val_pred_trivial = np.full(len(y_val), p_global_train)
+
+# 2) Baseline histórico: tasa de renovación por grado
+grade_rates = df_train.groupby("grade_level")[target].mean().to_dict()
+val_pred_historico = df_val["grade_level"].map(grade_rates).fillna(p_global_train).values
+
+# 3) Baseline operativo: prioridad por saldo pendiente
+max_bal = df_train["outstanding_balance"].max()
+val_pred_operativo = 1 - (df_val["outstanding_balance"].fillna(0) / max_bal).clip(0, 1).values
+
+# 4) Modelo mínimo interpretable: Regresión Logística
+model_lr = Pipeline([
+    ("preprocessor", preprocessor),
+    ("classifier", LogisticRegression(random_state=RANDOM_STATE, max_iter=1000))
+])
+model_lr.fit(X_train, y_train)
+val_pred_lr = model_lr.predict_proba(X_val)[:, 1]
+
+# 5) Modelo alternativo de complejidad moderada: Random Forest
+model_rf = Pipeline([
+    ("preprocessor", preprocessor),
+    ("classifier", RandomForestClassifier(
+        n_estimators=100, max_depth=6, min_samples_split=10,
+        min_samples_leaf=5, class_weight="balanced", random_state=RANDOM_STATE
+    ))
+])
+model_rf.fit(X_train, y_train)
+val_pred_rf = model_rf.predict_proba(X_val)[:, 1]
+
+# ── Comparación con ROC-AUC (ranking global) ──
+resultados_val = pd.DataFrame({
+    "Método": ["Baseline trivial", "Baseline histórico", "Baseline operativo",
+               "Regresión logística", "Random Forest"],
+    "ROC-AUC": [
+        roc_auc_score(y_val, val_pred_trivial),
+        roc_auc_score(y_val, val_pred_historico),
+        roc_auc_score(y_val, val_pred_operativo),
+        roc_auc_score(y_val, val_pred_lr),
+        roc_auc_score(y_val, val_pred_rf),
+    ]
+})
+
+# ── Comparación con métricas @300 (lo que de verdad importa: la capacidad es fija) ──
+def evaluar_top_k(y_real, score_riesgo, k=300):
+    y_real = pd.Series(y_real).reset_index(drop=True)
+    idx = np.argsort(-np.asarray(score_riesgo, dtype=float), kind="mergesort")[:k]
+    top = y_real.iloc[idx]
+    capturados = int(top.sum())
+    precision = top.mean()
+    recall = capturados / y_real.sum()
+    lift = precision / y_real.mean()
+    return capturados, precision, recall, lift
+
+y_val_riesgo = 1 - y_val  # 1 = no renovó (evento de interés)
+scores_riesgo = {
+    "Baseline trivial": val_pred_trivial,
+    "Baseline histórico": val_pred_historico,
+    "Baseline operativo": val_pred_operativo,
+    "Regresión logística": 1 - val_pred_lr,
+    "Random Forest": 1 - val_pred_rf,
+}
+
+metricas_300 = []
+for nombre, score in scores_riesgo.items():
+    capturados, precision, recall, lift = evaluar_top_k(y_val_riesgo, score, k=300)
+    metricas_300.append([capturados, precision, recall, lift])
+
+resultados_val[["Capturados@300", "Precisión@300", "Recall@300", "Lift@300"]] = metricas_300
+resultados_val = resultados_val.round(4)
+resultados_val
+
+Método	ROC-AUC	Capturados@300	Precisión@300	Recall@300	Lift@300
+0	Baseline trivial	0.5000	130.0	0.4333	0.1000	1.0133
+1	Baseline histórico	0.5053	114.0	0.3800	0.0877	0.8886
+2	Baseline operativo	0.3914	164.0	0.5467	0.1262	1.2784
+3	Regresión logística	0.6077	168.0	0.5600	0.1292	1.3095
+4	Random Forest	0.5925	150.0	0.5000	0.1154	1.1692
+
+Conclusión de la comparación: dado que la capacidad operativa es fija (300 contactos), la métrica que debe decidir es la de corte — no el ROC-AUC general. La Regresión Logística supera a Random Forest en las cinco métricas al mismo tiempo (ROC-AUC, capturados, precisión, recall y lift en el top 300). El modelo más complejo no ofrece ninguna mejora que justifique su uso — se congela el modelo mínimo interpretable: Regresión Logística.
+
+
+
+
+
